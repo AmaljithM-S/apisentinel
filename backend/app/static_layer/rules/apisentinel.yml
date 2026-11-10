@@ -1,0 +1,182 @@
+# APISentinel Semgrep rule pack.
+#
+# Deliberately scoped to syntactically explicit API vulnerabilities — the
+# categories where pattern matching is already close to optimal (injection,
+# misconfiguration, hardcoded credentials). Context-dependent categories
+# (BOLA, excessive data exposure, business logic) are intentionally *not*
+# handled here; they are the job of the structural, LLM and runtime layers.
+rules:
+  - id: apisentinel-sql-string-format
+    languages: [python]
+    severity: ERROR
+    message: >-
+      SQL query is built by string interpolation of caller-controlled input.
+      An attacker can alter the query structure (SQL injection).
+    metadata:
+      owasp_api: API10
+      cwe: CWE-89
+      title: SQL query built by string interpolation
+      severity: critical
+      remediation: Use bound parameters, e.g. text("... WHERE id = :id") with {"id": id}.
+    patterns:
+      - pattern-either:
+          - pattern: $CUR.execute(f"...".format(...))
+          - pattern: $CUR.execute(f"...")
+          - pattern: $CUR.execute("..." % ...)
+          - pattern: $CUR.execute("..." + $X)
+          - pattern: $CUR.execute("...".format(...))
+          - pattern: $DB.execute(text(f"..."))
+          - pattern: $DB.execute(text("..." + $X))
+          - pattern: $DB.execute(text("..." % ...))
+          - pattern: $DB.execute(text("...".format(...)))
+
+  - id: apisentinel-raw-sql-fstring-variable
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A SQL statement is assembled in an f-string before execution, so caller
+      input is concatenated into the query text.
+    metadata:
+      owasp_api: API10
+      cwe: CWE-89
+      title: SQL statement assembled with an f-string
+      severity: critical
+      remediation: Build the statement with placeholders and pass values separately.
+    patterns:
+      - pattern-regex: (?i)(query|sql|stmt)\s*=\s*f?["'](select|insert|update|delete)\b[^"']*\{
+
+  - id: apisentinel-os-command-injection
+    languages: [python]
+    severity: ERROR
+    message: A shell command is built from interpolated input (command injection).
+    metadata:
+      owasp_api: API10
+      cwe: CWE-78
+      title: Shell command built from interpolated input
+      severity: critical
+      remediation: Use subprocess with an argument list and shell=False.
+    patterns:
+      - pattern-either:
+          - pattern: os.system(f"...")
+          - pattern: os.popen(f"...")
+          - pattern: subprocess.run(f"...", shell=True, ...)
+          - pattern: subprocess.call(f"...", shell=True, ...)
+          - pattern: subprocess.Popen(f"...", shell=True, ...)
+
+  - id: apisentinel-eval-of-request-data
+    languages: [python]
+    severity: ERROR
+    message: eval/exec is applied to runtime data, allowing arbitrary code execution.
+    metadata:
+      owasp_api: API10
+      cwe: CWE-95
+      title: eval/exec on runtime data
+      severity: critical
+      remediation: Parse the value explicitly (json.loads, int()) instead of evaluating it.
+    patterns:
+      - pattern-either:
+          - pattern: eval($X)
+          - pattern: exec($X)
+
+  - id: apisentinel-debug-mode-enabled
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Debug mode is enabled. Debug builds expose stack traces, interactive
+      consoles and internal configuration to callers.
+    metadata:
+      owasp_api: API8
+      cwe: CWE-489
+      title: Debug mode enabled
+      severity: high
+      remediation: Drive debug from configuration and default it to false.
+    patterns:
+      - pattern-either:
+          - pattern: FastAPI(..., debug=True, ...)
+          - pattern: $APP.run(..., debug=True, ...)
+          - pattern-regex: (?m)^\s*DEBUG\s*(:\s*bool\s*)?=\s*True\s*$
+
+  - id: apisentinel-permissive-cors
+    languages: [python]
+    severity: WARNING
+    message: >-
+      CORS is configured to allow every origin together with credentials, so
+      any site can issue authenticated cross-origin requests.
+    metadata:
+      owasp_api: API8
+      cwe: CWE-942
+      title: Permissive CORS with credentials
+      severity: high
+      remediation: List explicit trusted origins instead of "*" when allow_credentials is true.
+    patterns:
+      - pattern: |
+          $APP.add_middleware(CORSMiddleware, ..., allow_origins=["*"], ..., allow_credentials=True, ...)
+
+  - id: apisentinel-hardcoded-secret
+    languages: [python]
+    severity: ERROR
+    message: A credential or signing key is hardcoded in source.
+    metadata:
+      owasp_api: API2
+      cwe: CWE-798
+      title: Hardcoded credential or signing key
+      severity: high
+      remediation: Read the value from configuration or a secret store.
+    patterns:
+      - pattern-regex: (?i)^\s*(SECRET_KEY|JWT_SECRET|API_KEY|PASSWORD|TOKEN|PRIVATE_KEY)\s*(:\s*str\s*)?=\s*["'][^"'\s]{8,}["']
+
+  - id: apisentinel-jwt-verification-disabled
+    languages: [python]
+    severity: ERROR
+    message: >-
+      JWT signature verification is disabled, so any caller can forge a token
+      with arbitrary claims.
+    metadata:
+      owasp_api: API2
+      cwe: CWE-347
+      title: JWT signature verification disabled
+      severity: critical
+      remediation: Verify the signature with the expected algorithm and audience.
+    patterns:
+      - pattern-either:
+          - pattern: jwt.decode(..., options={..., "verify_signature": False, ...}, ...)
+          - pattern: jwt.decode(..., verify=False, ...)
+          - pattern: jwt.get_unverified_claims(...)
+          - pattern: jwt.decode(..., algorithms=["none"], ...)
+
+  - id: apisentinel-tls-verification-disabled
+    languages: [python]
+    severity: WARNING
+    message: TLS certificate verification is disabled for an outbound request.
+    metadata:
+      owasp_api: API10
+      cwe: CWE-295
+      title: TLS verification disabled
+      severity: high
+      remediation: Leave certificate verification enabled and trust a proper CA bundle.
+    patterns:
+      - pattern-either:
+          - pattern: requests.$M(..., verify=False, ...)
+          - pattern: httpx.$M(..., verify=False, ...)
+          - pattern: httpx.Client(..., verify=False, ...)
+
+  - id: apisentinel-ssrf-unvalidated-fetch
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A caller-supplied URL is fetched by the server without validation
+      (server-side request forgery).
+    metadata:
+      owasp_api: API7
+      cwe: CWE-918
+      title: Server-side request forgery via unvalidated URL
+      severity: high
+      remediation: Validate the URL against an allowlist of schemes and hosts before fetching.
+    patterns:
+      - pattern-either:
+          - pattern: requests.get($URL, ...)
+          - pattern: httpx.get($URL, ...)
+          - pattern: urllib.request.urlopen($URL, ...)
+      - metavariable-regex:
+          metavariable: $URL
+          regex: (?i).*(url|uri|link|target|endpoint|callback|webhook).*

@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q tests
+        env: { DATABASE_URL: "sqlite://" }
+
+  # The URL-mode (black-box) scanning tests need real JSONB/UUID columns, so
+  # they are skipped automatically under the sqlite job above and run here
+  # instead, against a real Postgres service container. See
+  # docs/WEB_SCANNING.md section 7 for what each test file proves.
+  backend-postgres:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: apisentinel, POSTGRES_PASSWORD: apisentinel, POSTGRES_DB: apisentinel }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U apisentinel -d apisentinel"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -r requirements.txt
+      # Lets test_js_crawler.py actually run instead of skipping; every other
+      # test file is unaffected if this step is ever removed.
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m alembic upgrade head
+        env: { DATABASE_URL: "postgresql+psycopg://apisentinel:apisentinel@localhost:5432/apisentinel" }
+      - run: python -m pytest -q tests
+        env:
+          DATABASE_URL: "postgresql+psycopg://apisentinel:apisentinel@localhost:5432/apisentinel"
+          JWT_SECRET: "ci-test-secret"
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm install
+      - run: npm test
+      - run: npm run build
+
+  # Dogfooding: APISentinel's static layer on the bundled target, uploaded as SARIF.
+  self-scan:
+    runs-on: ubuntu-latest
+    permissions: { security-events: write, contents: read }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install bandit==1.8.0 semgrep==1.99.0
+      - run: semgrep --config backend/app/static_layer/rules/apisentinel.yml --sarif -o semgrep.sarif targets/ || true
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: semgrep.sarif }
+        continue-on-error: true
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env && docker compose build backend frontend vulnapi

@@ -1,0 +1,23 @@
+# secrets and local config
+.env
+.env.*
+!.env.example
+docker-compose.override.yml.bak-*
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+# node
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+# misc
+*.log
+*.sql.gz
+*.tar.gz
+.idea/
+.vscode/
+.DS_Store

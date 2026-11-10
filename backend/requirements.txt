@@ -1,0 +1,34 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.36
+alembic==1.14.0
+psycopg[binary]==3.2.3
+pydantic==2.10.4
+pydantic-settings==2.7.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-multipart==0.0.20
+httpx==0.28.1
+PyYAML==6.0.2
+bandit==1.8.0
+semgrep==1.99.0
+slowapi==0.1.9
+reportlab==4.2.5
+pytest==8.3.4
+pytest-asyncio==0.25.0
+email-validator>=2.0.0
+# URL-based (black-box) web scanning: crawling and form/link parsing.
+beautifulsoup4==4.12.3
+lxml==5.3.0
+
+# JavaScript-rendered-page discovery (single-page apps): renders a bounded
+# number of pages in real headless Chromium to find links, forms and
+# XHR/fetch calls that only exist after JavaScript runs. Per-scan opt-in
+# (scope_config.use_playwright) since it is meaningfully heavier than every
+# other check in this project — not something to force on a resource-
+# constrained deployment by default. The Dockerfile's `playwright install
+# chromium` step adds roughly 300-400 MB to the backend image; see
+# docs/WEB_SCANNING.md for the size/runtime trade-off and how to disable it
+# entirely if that is not wanted.
+playwright==1.56.0

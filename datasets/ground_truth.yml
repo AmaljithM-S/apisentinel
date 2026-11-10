@@ -1,0 +1,158 @@
+# Answer key for the bundled vulnerable target (targets/vulnapi/app.py).
+#
+# `labels` lists every OWASP API category that is genuinely present on the
+# endpoint. `vulnerable: false` entries are the negative controls: an endpoint
+# that is safe by construction. They are what make precision and false-positive
+# rate meaningful — without negatives, a scanner that flags everything scores
+# perfectly on recall and the metric is worthless.
+#
+# `primary` is the single category stored in the database table (which holds one
+# row per endpoint); the harness scores against the full `labels` list.
+
+dataset: vulnapi-v1
+description: >-
+  Deliberately vulnerable FastAPI service covering the OWASP API Security
+  Top 10 (2023), including one stated-business-rule violation that no
+  signature-based scanner can detect.
+
+endpoints:
+  - method: POST
+    path: /login
+    vulnerable: true
+    primary: API2
+    labels: [API2]
+    business_rule: "Passwords must be salted hashes; tokens must be signed and expire; 5 failed logins lock the account."
+    notes: Plaintext password comparison, unsigned token, no lockout or rate limit.
+
+  - method: GET
+    path: /orders/{order_id}
+    vulnerable: true
+    primary: API1
+    labels: [API1]
+    business_rule: "A user may read only their own orders."
+    notes: Authenticated but no ownership check — classic BOLA, runtime-verifiable.
+
+  - method: GET
+    path: /invoices/{invoice_id}
+    vulnerable: true
+    primary: API1
+    labels: [API1, API3]
+    business_rule: "Tax identifiers are visible only to the invoice owner."
+    notes: BOLA plus exposure of tax identifiers.
+
+  - method: GET
+    path: /my/orders
+    vulnerable: false
+    primary: null
+    labels: []
+    notes: NEGATIVE CONTROL — query is scoped to the caller and bounded.
+
+  - method: GET
+    path: /profile/{user_id}
+    vulnerable: true
+    primary: API2
+    labels: [API2, API3]
+    notes: No authentication dependency at all on personal data.
+
+  - method: GET
+    path: /users/{user_id}
+    vulnerable: true
+    primary: API3
+    labels: [API3]
+    business_rule: "Personal data (SSN, MFA secret, password hash) must never appear in a response."
+    notes: Returns the entire user row.
+
+  - method: GET
+    path: /users
+    vulnerable: true
+    primary: API3
+    labels: [API3, API4]
+    business_rule: "Any list endpoint must be paginated with a maximum page size of 100."
+    notes: Unpaginated dump of all columns of all users.
+
+  - method: GET
+    path: /search
+    vulnerable: true
+    primary: API4
+    labels: [API4, API10]
+    notes: Caller-controlled unbounded limit, and the LIKE clause is concatenated.
+
+  - method: GET
+    path: /admin/users
+    vulnerable: true
+    primary: API5
+    labels: [API5]
+    business_rule: "Every route under /admin requires the admin role."
+    notes: Admin route with no role check — BFLA, runtime-verifiable.
+
+  - method: POST
+    path: /admin/promote
+    vulnerable: true
+    primary: API5
+    labels: [API5]
+    business_rule: "Role changes require an administrator and must be audited."
+    notes: Privilege escalation available to any authenticated user.
+
+  - method: GET
+    path: /admin/audit-log
+    vulnerable: false
+    primary: null
+    labels: []
+    notes: NEGATIVE CONTROL — the role check is present and correct.
+
+  - method: POST
+    path: /transfers
+    vulnerable: true
+    primary: API6
+    labels: [API6]
+    business_rule: "Standard tier: max 5000/day. Transfers above 3000 need manager approval. Amounts must be positive."
+    notes: >-
+      THE BUSINESS-LOGIC CASE. Nothing here is a recognisable insecure pattern:
+      the code is clean, parameterised and authenticated. It is a vulnerability
+      only relative to the documented rules, so only the reasoning layer with
+      the business-rules input can find it.
+
+  - method: GET
+    path: /fetch-avatar
+    vulnerable: true
+    primary: API7
+    labels: [API7]
+    business_rule: "Avatars may be fetched only from images.vulnshop.test; private and loopback addresses are forbidden."
+    notes: Unvalidated outbound fetch of a caller-supplied URL (SSRF).
+
+  - method: GET
+    path: /internal/debug/config
+    vulnerable: true
+    primary: API9
+    labels: [API9, API8]
+    notes: Undocumented debug route leaking the signing key and environment.
+
+  - method: GET
+    path: /users/search-by-email
+    vulnerable: true
+    primary: API10
+    labels: [API10]
+    notes: SQL built by f-string concatenation.
+
+  - method: GET
+    path: /orders/by-item
+    vulnerable: false
+    primary: null
+    labels: []
+    notes: NEGATIVE CONTROL — parameterised query, bounded result set.
+
+  - method: GET
+    path: /health
+    vulnerable: false
+    primary: null
+    labels: []
+    notes: NEGATIVE CONTROL — public liveness probe with no data access.
+
+# Application-level (not endpoint-level) issues the static layer should also
+# report once for the module: debug mode enabled, wildcard CORS with
+# credentials, and a hardcoded secret.
+application:
+  - category: API8
+    labels: [API8]
+    vulnerable: true
+    notes: debug=True, allow_origins=["*"] with allow_credentials=True, hardcoded SECRET_KEY.
